@@ -159,6 +159,7 @@ class OilPalmImages(object):
         labels_df = pd.DataFrame()
         labels_df['img_filename'] = self.labels_dic.keys()
         labels_df['img_label'] = list(map(lambda x: self.get_label_forImage(x), self.labels_dic.keys()))
+        labels_df = labels_df[labels_df['img_label']>=0]
 
         plt.hist(labels_df.img_label.values)
         plt.xlabel('has_oilpalm class')
