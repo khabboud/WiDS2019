@@ -9,14 +9,18 @@ from sklearn.decomposition import PCA
 import matplotlib.image as mpimg
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
-
-
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import confusion_matrix, roc_auc_score
+from sklearn.metrics import roc_curve, auc
+from sklearn import metrics
+import tensorflow as tf
+import random
 
 class OilPalmImages(object):
     """
     This class is used to load and pre-process training images and read the labels from csv file (containing crowd sourced labels with a score)
     """
-    def __init__(self, file_directory = None, labels_file_name = None, pca_components = None, label_selection_probability = 1, label_selection_method = 'hard', max_samples_class0 = 15000, max_samples_class1 =15000):
+    def __init__(self, file_directory = None, labels_file_name = None, apply_pca = True, pca_components = None, label_selection_probability = 1, label_selection_method = 'hard', max_samples_class0 = 15000, max_samples_class1 =15000):
         self.file_directory = file_directory
         self.pca_components = pca_components
         self.labels_file_name = labels_file_name
@@ -24,12 +28,17 @@ class OilPalmImages(object):
         self.label_selection_method = label_selection_method
         self.max_samples_class0 = max_samples_class0
         self.max_samples_class1 = max_samples_class1
+        self.apply_pca = apply_pca
         self.labels_dic = None
         self.X_train = None
         self.Y_train = None
+        self.X_train_split = None
+        self.Y_train_split = None
         self.X_test = None
         self.Y_test = None
         self.num_features = None
+        self.width = None
+        self.height = None
 
     def read_train_images(self):
         self.X_train, self.Y_train = self.read_images(self.file_directory, self.max_samples_class0, self.max_samples_class1)
@@ -47,13 +56,19 @@ class OilPalmImages(object):
             #pix_val = list(img.getdata())
             if f_count == 0:
                 im = Image.open(file_directory+f, 'r')
-                width, height = im.size
+                self.width, self.height = im.size
                 # X_R = - np.ones([file_count,width*height])
                 # X_G = - np.ones([file_count,width*height])
                 # X_B = - np.ones([file_count,width*height])
                 #X = - np.ones([file_count,3*width*height])
-                X = - np.ones([file_count,width*self.pca_components])
-                self.num_features = width*self.pca_components
+                if self.apply_pca:
+                    X = - np.ones([file_count,self.width*self.pca_components])
+                    self.num_features = self.width*self.pca_components
+                else:
+                    X = - np.ones([file_count,3*self.width*self.height])
+                    self.num_features = self.width*3*self.height
+
+
             #-----process training image only if label accepted----------
             if not(Y[f_count] == -1):
                 # increment class counter
@@ -67,10 +82,14 @@ class OilPalmImages(object):
                     im = Image.open(file_directory+f, 'r')
                     img= mpimg.imread(file_directory+f)
                     width_f, height_f = im.size
-                    assert width_f==width,  "ERROR width not equal to rest of images"
-                    assert height_f==height,  "ERROR height not equal to rest of images"
-                    img_reduced_mat = self.apply_PCA_onImage(img, num_components=self.pca_components)
-                    X[f_count,:] = img_reduced_mat.reshape((1,width*self.pca_components))
+                    assert width_f==self.width,  "ERROR width not equal to rest of images"
+                    assert height_f==self.height,  "ERROR height not equal to rest of images"
+                    if self.apply_pca:
+                        img_reduced_mat = self.apply_PCA_onImage(img, num_components=self.pca_components)
+                        X[f_count,:] = img_reduced_mat.reshape((1,self.width*self.pca_components))
+                    else:
+                        pix_val = list(im.getdata())
+                        X[f_count,:] = np.asarray([x for sets in pix_val for x in sets])
                     f_count +=1
             else:
                 print("training sample rejected")
@@ -85,14 +104,6 @@ class OilPalmImages(object):
 
         return X, Y
 
-
-
-    # def apply_PCA(X_train):
-    #     pca_dims = PCA()
-    #     pca_dims.fit(X_train)
-    #     cumsum = np.cumsum(pca_dims.explained_variance_ratio_)
-    #     d = np.argmax(cumsum >= 0.95) + 1
-    #     print('reduced dimension of the training data X after PCA=',d)
 
 
     def apply_PCA_onImage(self, img, num_components = None, var = 0.95, show_reconstructed_img = False):
@@ -144,181 +155,84 @@ class OilPalmImages(object):
             else:
                 return img_label
 
+    def get_labels_dataframe(self):
+        labels_df = pd.DataFrame()
+        labels_df['img_filename'] = self.labels_dic.keys()
+        labels_df['img_label'] = list(map(lambda x: self.get_label_forImage(x), self.labels_dic.keys()))
 
-#
-# class OilPalmClassifier(object):
-#     """
-#     This class can be used to calculate the distance estimation using a ML model as an alternative for pathloss models
-#     """
-#     def __init__(self, training_data, training_labels):
-#         self.X = training_data
-#         self.Y = training_labels
-#         self.x_train_mean  = None
-#         self.x_train_std  = None
-#
-#         self.num_training_samples = None
-#         self.test_results = None
-#         self.ML_model = None
-#
-#
-#     def label_images(self, test_file_directory):
-#         f_count = 0
-#         file_count = (len([f for f in listdir(test_file_directory)]))
-#         test_res = pd.DataFrame()
-#         test_res['image_id'] = listdir(test_file_directory):
-#         test_labels = - np.ones(file_count)
-#         for f in listdir(test_file_directory):
-#             print("processing test sample# ",f_count )
-#             im = Image.open(test_file_directory+f, 'r')
-#             img= mpimg.imread(test_file_directory+f)
-#             width_f, height_f = im.size
-#             assert width_f==width,  "ERROR width not equal to rest of images"
-#             assert height_f==height,  "ERROR height not equal to rest of images"
-#             img_reduced_mat = self.apply_PCA_onImage(img, num_components=self.pca_components)
-#             X_features = img_reduced_mat.reshape((1,width*self.pca_components))
-#             test_labels[f_count] = self.clf.predict(X_features.reshape(1, -1))[0]
-#             f_count +=1
-#
-#         test_res['has_oilpalm'] = test_labels
-#         test_res.to_csv('test_results.csv')
-#         return
-#
-#     def train_test_data_split(self, X_train, Y_train, normalize_data = True):
-#
-#
-#         self.num_training_samples =len(y_train
-#         x_train, x_test, y_train, y_test = train_test_split(X_train,Y_train,train_size = 0.75, test_size = 0.25 , random_state=1)
-#
-#         #-------------------Normalizing the Data ----------------
-#         #-------should use mean/var of training data only -------
-#         if normalize_data:
-#             x_train_mean = x_train.mean()
-#             x_train_std = x_train.std()
-#             x_train = (x_train - x_train_mean)/ x_train_std
-#             x_test = (x_test - x_train_mean)/ x_train_std
-#             self.x_train_mean  = x_train_mean
-#             self.x_train_std  = x_train_std
-#
-#         # X_train, X_test, y_train, y_test = train_test_split(x,y,train_size = 0.75, test_size = 0.25 , random_state=1)
-#         return x_train, x_test, y_train, y_test, x_test_rest, num_training_samples
-#
-#     def plot_correlation_matrix(self, feature_matrix = None):
-#         if feature_matrix is None:
-#             x = self.train_feature_matrix
-#         else:
-#             x = feature_matrix
-#         #-------------------Correlation Matrix----------------------------------
-#         # Compute the correlation matrix
-#         corr = x.corr()
-#         # Generate a mask for the upper triangle
-#         mask = np.zeros_like(corr, dtype=np.bool)
-#         mask[np.triu_indices_from(mask)] = True
-#         # Set up the matplotlib figure
-#         f, ax = plt.subplots(figsize=(11, 9))
-#         # Generate a custom diverging colormap
-#         cmap = sns.diverging_palette(220, 10, as_cmap=True)
-#         # Draw the heatmap with the mask and correct aspect ratio
-#         sns.heatmap(corr, cmap=cmap, vmax=.3, center=0,
-#                     square=True, linewidths=.5, cbar_kws={"shrink": .5})
-#         plt.show()
-#         return
-#
-#     def train_test_ML_model(self, categorical_columns = None, x_train = None, y_train = None, x_test = None, y_test = None, x_test_rest = None, model_name = 'linear_regression', kernel = 'linear'):
-#         # kernel can be 'linear' , 'rbf', 'poly'
-#         # model can be 'linear regression', 'support vector regressor', 'random forest regressor','Bayesian Ridge','Gaussian Process'
-#         is_class_data_flag = False
-#         if x_train is None:
-#             is_class_data_flag = True
-#             y_train = self.train_decision_vector.copy()
-#             x_train = self.train_feature_matrix.copy()
-#             y_test= self.test_decision_vector.copy()
-#             x_test= self.test_feature_matrix.copy()
-#             x_test_rest = self.test_rest_matrix.copy()
-#
-#         x_test_without1hot = x_test.copy()
-#         feature_importance_exist = False
-#
-#         # -----------one hot encoding of categorical features---------------------
-#         if categorical_columns is not None:
-#             for cat in categorical_columns:
-#                 x_train[cat] = x_train[cat].astype('category')
-#                 x_test[cat] = x_test[cat].astype('category')
-#             x_train = pd.get_dummies(x_train)
-#             x_test = pd.get_dummies(x_test)
-#             hot1_remove_col = x_train.columns[-1]
-#             # print('x_train_data_types', x_train.dtypes)
-#             # print('x_test_data_types', x_test.dtypes)
-#             print('remove one column from the one-hot-encoding, column=', hot1_remove_col)
-#             x_train = x_train.drop([hot1_remove_col], axis=1 )
-#             x_test = x_test.drop([hot1_remove_col], axis=1 )
-#         print('Using ML_model =', model_name)
-#         if model_name == 'linear_regression':
-#             # Create linear regression object
-#             ML_model = linear_model.LinearRegression()
-#             feature_importance_exist = True
-#             # # The coefficients
-#             # print('Coefficients: \n', lin_regr.coef_)
-#         elif model_name == 'support vector regressor':
-#             ML_model =  SVR(kernel=kernel, C=1e3, gamma=0.1)
-#         elif model_name == 'random forest regressor':
-#             ML_model = RandomForestRegressor()
-#             feature_importance_exist = True
-#         elif model_name == 'Bayesian Ridge':
-#             ML_model = linear_model.BayesianRidge()
-#         elif model_name == 'Gaussian Process':
-#             ML_model = gaussian_process.GaussianProcessRegressor()
-#
-#
-#         # Train the model using the training sets
-#         ML_model.fit(x_train,y_train)
-#         # Make predictions using the testing set
-#         distance_y_pred = ML_model.predict(x_test)
-#
-#         #------ Test the trained model on the test set ------------------
-#         # print stats ..........
-#         # The mean squared error
-#         print("Mean squared error: %.2f"
-#               % mean_squared_error(y_test, distance_y_pred))
-#         print("RMSE: %.2f"
-#               % np.sqrt(mean_squared_error(y_test, distance_y_pred)))
-#         # Explained variance score: 1 is perfect prediction
-#         print('r2_score: %.2f' % r2_score(y_test, distance_y_pred))
-#
-#         if feature_importance_exist:
-#             if model_name == 'linear_regression':
-#                 print("Feature coefficients (importance)...")
-#                 # res = pd.DataFrame(ML_model.coef_ ,x_train.columns.values)
-#                 # res.plot(kind='bar')
-#                 # plt.ylabel('Feature Coefficient')
-#                 # plt.show()
-#                 print(x_train.columns)
-#                 print(type(x_train.columns))
-#                 print(ML_model.coef_[0] )
-#                 print(type(ML_model.coef_ ))
-#                 plt.title("Feature coefficients (importance)...")
-#                 plt.bar(x_train.columns.values, ML_model.coef_[0],  color="b", align="center", alpha = 0.5)
-#                 plt.xticks(rotation='vertical')
-#                 plt.show()
-#             else: # i.e., RF model
-#                 # -----------Plot the feature importances of the forest
-#                 RF_feature_import = ML_model.feature_importances_
-#                 plt.figure()
-#                 plt.title("Feature coefficients (importance)...")
-#                 plt.bar(x_train.columns.values, RF_feature_import,  color="b", align="center", alpha = 0.5)
-#                 plt.xticks(rotation='vertical')
-#                 plt.show()
-#         #---------Combine the test results with the non-feature columns
-#         test_results = pd.concat([x_test_without1hot,x_test_rest], axis = 1) # notice that test_rest
-#         test_results['distance_estimate_4'] = distance_y_pred
-#         test_results = test_results.reset_index(drop=True)
-#         if is_class_data_flag:
-#             self.test_results = test_results
-#             self.ML_model = ML_model
-#         return test_results
-#     # def cluster_nodes():
-#
-#
-#
+        plt.hist(labels_df.img_label.values)
+        plt.xlabel('has_oilpalm class')
+        plt.show()
+        labels_df['img_label'] = labels_df['img_label'].astype(str)
+        self.labels_df = labels_df;
+        return labels_df
+
+
+    def train_NN(self):
+        X_train, X_test, y_train, y_test = train_test_split(self.X_train,self.Y_train,train_size = 0.75, test_size = 0.25 , random_state=1)
+        self.clf = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(5,2), random_state=1)
+        self.clf.fit(X_train, y_train)
+        t = self.clf.predict_proba(X_test)
+        y_pred = self.clf.predict(X_test)
+        print("test score=",self.clf.score(X_test,y_test))
+        plt.hist(y_pred)
+        plt.show()
+        cm = confusion_matrix(y_test, y_pred)
+        # Show confusion matrix in a separate window
+        plt.matshow(cm)
+        plt.title('Confusion matrix')
+        plt.colorbar()
+        plt.ylabel('True label')
+        plt.xlabel('Predicted label')
+        plt.show()
+        #print('Test ROC:', roc_auc_score(y_train, y_pred))
+        self.plotAUC(self.clf,X_test, y_test)
+        plt.show()
+
+
+
+    def plotAUC(self, model, x_test, y_test):
+        preds = model.predict_proba(x_test)[:,1]
+        fpr, tpr, _ = metrics.roc_curve(y_test, preds)
+        plt.figure()
+        plt.plot(fpr, tpr, color='darkorange')
+        plt.plot([0, 1], [0, 1], color='navy',  linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        auc_perc=metrics.auc(fpr, tpr)
+        plt.text(0.95, 0.01, 'auc value= %.2f' %   auc_perc,verticalalignment='bottom', horizontalalignment='right', fontsize=15)
+        plt.xlabel('False Positive Rate',fontsize=17)
+        plt.ylabel('True Positive Rate',fontsize=17)
+        plt.tick_params(labelsize=15)
+        plt.legend(loc="lower right")
+
+
+    def label_images(self, test_file_directory):
+        f_count = 0
+        file_count = (len([f for f in listdir(test_file_directory)]))
+        test_res = pd.DataFrame()
+        test_res['image_id'] = listdir(test_file_directory)
+        test_labels = - np.ones(file_count)
+        for f in listdir(test_file_directory):
+            print("processing test sample# ",f_count )
+            im = Image.open(test_file_directory+f, 'r')
+            img= mpimg.imread(test_file_directory+f)
+            width_f, height_f = im.size
+            if self.apply_pca:
+                assert width_f==self.width,  "ERROR width not equal to rest of images"
+                assert height_f==self.height,  "ERROR height not equal to rest of images"
+                img_reduced_mat = self.apply_PCA_onImage(img, num_components=self.pca_components)
+                X_features = img_reduced_mat.reshape((1,self.width*self.pca_components))
+            else:
+                pix_val = list(im.getdata())
+                X_features = np.asarray([x for sets in pix_val for x in sets])
+            test_labels[f_count] = self.clf.predict(X_features.reshape(1, -1))[0]
+            f_count +=1
+
+        test_res['has_oilpalm'] = test_labels
+        test_res.to_csv('test_results.csv', index=False)
+        return
+
 
 def main():
     train_file_directory = "widsdatathon2019/train_images_less/"
